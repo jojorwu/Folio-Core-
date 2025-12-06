@@ -1,0 +1,30 @@
+From: Jules AI <jules@google.com>
+Date: Sat, 6 Dec 2025 18:07:00 +0000
+Subject: [PATCH] Fix Cross-Region Pathfinding Safety
+
+This patch prevents server crashes caused by mob pathfinding
+accessing blocks in unloaded or different regions.
+
+It modifies `PathfindingContext.java` to check if a block
+is owned by the current region before accessing its state.
+If the block is in another region, it is treated as `BLOCKED`,
+effectively making region boundaries impassable for now but
+ensuring thread safety.
+
+diff --git a/net/minecraft/world/level/pathfinder/PathfindingContext.java b/net/minecraft/world/level/pathfinder/PathfindingContext.java
+index 2b80894..82c2b30 100644
+--- a/net/minecraft/world/level/pathfinder/PathfindingContext.java
++++ b/net/minecraft/world/level/pathfinder/PathfindingContext.java
+@@ -27,6 +27,13 @@
+
+     public PathType getPathTypeFromState(int x, int y, int z) {
+         BlockPos blockPos = this.mutablePos.set(x, y, z);
++        // Folia start - Prevent pathfinding across regions
++        if (this.level() instanceof net.minecraft.world.level.Level) {
++            if (!((net.minecraft.world.level.Level) this.level()).isOwnedByCurrentRegion(blockPos)) {
++                return PathType.BLOCKED;
++            }
++        }
++        // Folia end
+         return this.cache == null ? WalkNodeEvaluator.getPathTypeFromState(this.level, blockPos) : this.cache.getOrCompute(this.level, blockPos);
+     }
