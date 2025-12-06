@@ -1,0 +1,98 @@
+From: FolioDev <dev@folio.net>
+Date: Sat, 06 Dec 2025 14:00:00 +0000
+Subject: [PATCH] Optimize ServerExplosion
+
+This patch improves explosion performance.
+
+diff --git a/net/minecraft/world/level/ServerExplosion.java b/net/minecraft/world/level/ServerExplosion.java
+index 1234567..89abcdef 100644
+--- a/net/minecraft/world/level/ServerExplosion.java
++++ b/net/minecraft/world/level/ServerExplosion.java
+@@ -176,44 +176,53 @@
+         int floor5 = Mth.floor(this.center.z + f + 1.0);
+
+         for (Entity entity : this.level.getEntities(this.source, new AABB(floor, floor2, floor4, floor1, floor3, floor5))) {
+-            if (!entity.ignoreExplosion(this)) {
+-                double d = Math.sqrt(entity.distanceToSqr(this.center)) / f;
+-                if (d <= 1.0) {
+-                    double d1 = entity.getX() - this.center.x;
+-                    double d2 = (entity instanceof PrimedTnt ? entity.getY() : entity.getEyeY()) - this.center.y;
+-                    double d3 = entity.getZ() - this.center.z;
+-                    double squareRoot = Math.sqrt(d1 * d1 + d2 * d2 + d3 * d3);
+-                    if (squareRoot != 0.0) {
+-                        d1 /= squareRoot;
+-                        d2 /= squareRoot;
+-                        d3 /= squareRoot;
+-                        boolean shouldDamageEntity = this.damageCalculator.shouldDamageEntity(this, entity);
+-                        float knockbackMultiplier = this.damageCalculator.getKnockbackMultiplier(entity);
+-                        float f1 = !shouldDamageEntity && knockbackMultiplier == 0.0F ? 0.0F : getSeenPercent(this.center, entity);
+-                        if (shouldDamageEntity) {
+-                            entity.hurtServer(this.level, this.damageSource, this.damageCalculator.getEntityDamageAmount(this, entity, f1));
+-                        }
++            if (this.level.isOwnedByCurrentRegion(entity)) {
++                this.applyExplosionEffects(entity, f);
++            } else {
++                this.level.getRegionScheduler().execute(entity, () -> this.applyExplosionEffects(entity, f));
++            }
++        }
++    }
+
+-                        double d4 = (1.0 - d) * f1 * knockbackMultiplier;
+-                        double d5;
+-                        if (entity instanceof LivingEntity livingEntity) {
+-                            d5 = d4 * (1.0 - livingEntity.getAttributeValue(Attributes.EXPLOSION_KNOCKBACK_RESISTANCE));
+-                        } else {
+-                            d5 = d4;
+-                        }
++    private void applyExplosionEffects(Entity entity, float explosionRadius) {
++        if (entity.ignoreExplosion(this)) {
++            return;
++        }
++        double d = Math.sqrt(entity.distanceToSqr(this.center)) / explosionRadius;
++        if (d <= 1.0) {
++            double d1 = entity.getX() - this.center.x;
++            double d2 = (entity instanceof PrimedTnt ? entity.getY() : entity.getEyeY()) - this.center.y;
++            double d3 = entity.getZ() - this.center.z;
++            double squareRoot = Math.sqrt(d1 * d1 + d2 * d2 + d3 * d3);
++            if (squareRoot != 0.0) {
++                d1 /= squareRoot;
++                d2 /= squareRoot;
++                d3 /= squareRoot;
++                boolean shouldDamageEntity = this.damageCalculator.shouldDamageEntity(this, entity);
++                float knockbackMultiplier = this.damageCalculator.getKnockbackMultiplier(entity);
++                float f1 = !shouldDamageEntity && knockbackMultiplier == 0.0F ? 0.0F : getSeenPercent(this.center, entity);
++                if (shouldDamageEntity) {
++                    entity.hurtServer(this.level, this.damageSource, this.damageCalculator.getEntityDamageAmount(this, entity, f1));
++                }
+
+-                        d1 *= d5;
+-                        d2 *= d5;
+-                        d3 *= d5;
+-                        Vec3 vec3 = new Vec3(d1, d2, d3);
+-                        entity.push(vec3);
+-                        if (entity instanceof Player player && !player.isSpectator() && (!player.isCreative() || !player.getAbilities().flying)) {
+-                            this.hitPlayers.put(player, vec3);
+-                        }
++                double d4 = (1.0 - d) * f1 * knockbackMultiplier;
++                double d5;
++                if (entity instanceof LivingEntity livingEntity) {
++                    d5 = d4 * (1.0 - livingEntity.getAttributeValue(Attributes.EXPLOSION_KNOCKBACK_RESISTANCE));
++                } else {
++                    d5 = d4;
++                }
+
+-                        entity.onExplosionHit(this.source);
+-                    }
++                d1 *= d5;
++                d2 *= d5;
++                d3 *= d5;
++                Vec3 vec3 = new Vec3(d1, d2, d3);
++                entity.push(vec3);
++                if (entity instanceof Player player && !player.isSpectator() && (!player.isCreative() || !player.getAbilities().flying)) {
++                    this.hitPlayers.put(player, vec3);
+                 }
++
++                entity.onExplosionHit(this.source);
+             }
+         }
+     }

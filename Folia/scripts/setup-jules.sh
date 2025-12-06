@@ -9,4 +9,4 @@ git config --global user.name "Jules AI"
 ./gradlew applyPatches
 
 # 3. Output the path to the sources so Jules knows where to find them
-echo "Minecraft sources are ready at: folio-server/build/support/folia-generated/generated-sources/"
+echo "Minecraft sources are ready at: Folia/folia-server/src/minecraft/java/"
