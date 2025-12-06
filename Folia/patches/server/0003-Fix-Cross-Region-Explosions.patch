@@ -1,6 +1,6 @@
 From: FolioDev <dev@folio.net>
 Date: Sat, 06 Dec 2025 14:00:00 +0000
-Subject: [PATCH] Optimize ServerExplosion
+Subject: [PATCH] Fix Cross-Region Explosions
 
 This patch improves explosion performance.
 
