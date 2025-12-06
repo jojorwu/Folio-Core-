@@ -1,0 +1,59 @@
+From: FolioDev <dev@example.com>
+Date: Sat, 06 Dec 2025 12:00:00 +0000
+Subject: [PATCH] Fix Cross-Region Redstone
+
+This patch schedules neighbor updates to the correct region scheduler
+to prevent crashes when redstone updates block across region borders.
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 1234567..89abcdef 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -1000,7 +1000,13 @@ public class ServerLevel extends Level implements WorldGenLevel {
+     @Override
+     public void updateNeighborsAt(BlockPos pos, Block block, @Nullable Orientation orientation) {
+-        this.neighborUpdater.updateNeighborsAtExceptFromFacing(pos, block, null, orientation);
++        // Folia start - Fix cross-region redstone
++        if (!this.isOwnedByCurrentRegion(pos)) {
++            this.getRegionScheduler().execute(pos, () -> this.neighborUpdater.updateNeighborsAtExceptFromFacing(pos, block, null, orientation));
++            return;
++        }
++        this.neighborUpdater.updateNeighborsAtExceptFromFacing(pos, block, null, orientation);
++        // Folio end
+     }
+
+     @Override
+     public void updateNeighborsAtExceptFromFacing(BlockPos pos, Block block, Direction facing, @Nullable Orientation orientation) {
+-        this.neighborUpdater.updateNeighborsAtExceptFromFacing(pos, block, facing, orientation);
++        // Folio start - Fix cross-region redstone
++        if (!this.isOwnedByCurrentRegion(pos)) {
++            this.getRegionScheduler().execute(pos, () -> this.neighborUpdater.updateNeighborsAtExceptFromFacing(pos, block, facing, orientation));
++            return;
++        }
++        this.neighborUpdater.updateNeighborsAtExceptFromFacing(pos, block, facing, orientation);
++        // Folio end
+     }
+
+     @Override
+     public void neighborChanged(BlockPos pos, Block block, @Nullable Orientation orientation) {
+-        this.neighborUpdater.neighborChanged(pos, block, orientation);
++        // Folio start - Fix cross-region redstone
++        if (!this.isOwnedByCurrentRegion(pos)) {
++            this.getRegionScheduler().execute(pos, () -> this.neighborUpdater.neighborChanged(pos, block, orientation));
++            return;
++        }
++        this.neighborUpdater.neighborChanged(pos, block, orientation);
++        // Folio end
+     }
+
+     @Override
+     public void neighborChanged(BlockState state, BlockPos pos, Block block, @Nullable Orientation orientation, boolean movedByPiston) {
+-        this.neighborUpdater.neighborChanged(state, pos, block, orientation, movedByPiston);
++        // Folio start - Fix cross-region redstone
++        if (!this.isOwnedByCurrentRegion(pos)) {
++            this.getRegionScheduler().execute(pos, () -> this.neighborUpdater.neighborChanged(state, pos, block, orientation, movedByPiston));
++            return;
++        }
++        this.neighborUpdater.neighborChanged(state, pos, block, orientation, movedByPiston);
++        // Folio end
+     }
