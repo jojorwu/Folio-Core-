@@ -31,15 +31,13 @@ echo "📁 Creating AI context directory at '$CONTEXT_DIR'..."
 mkdir -p "$CONTEXT_DIR/vanilla_ref"
 mkdir -p "$CONTEXT_DIR/shadow_workspace"
 
-# 3. Copy the vanilla source code into the 'vanilla_ref' directory.
+# 3. Synchronize the vanilla source code into the 'vanilla_ref' directory.
 # This provides the agent with a clean, read-only reference of the current codebase.
-# Before copying, we ensure the destination is empty to avoid stale files.
-echo "🧹 Clearing old reference sources..."
-# Using find and delete is safer than rm -rf on a variable path.
-find "$CONTEXT_DIR/vanilla_ref/" -mindepth 1 -delete
-echo "📚 Copying reference sources to '$CONTEXT_DIR/vanilla_ref'..."
-# We copy the entire source tree to provide full context.
-cp -r "$CANONICAL_SRC/." "$CONTEXT_DIR/vanilla_ref/" || { echo "❌ ERROR: Failed to copy reference sources."; exit 1; }
+# We use rsync for high performance by only copying changed files.
+echo "🔄 Synchronizing reference sources with rsync..."
+# The --delete flag ensures that files removed from the source are also removed from the destination.
+# The -a (archive) flag is a shortcut for -rlptgoD (recursive, links, perms, times, group, owner, devices).
+rsync -a --delete "$CANONICAL_SRC/" "$CONTEXT_DIR/vanilla_ref/" || { echo "❌ ERROR: Failed to synchronize reference sources with rsync."; exit 1; }
 
 # 4. Ensure the context directory is ignored by Git to avoid accidental commits.
 # This checks the .gitignore file inside the 'Folia' directory.
