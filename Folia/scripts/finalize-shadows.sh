@@ -1,6 +1,9 @@
 #!/bin/bash
 # scripts/finalize-shadows.sh
 
+# Exit immediately if a command exits with a non-zero status.
+set -e
+
 # This script applies changes from the 'shadow workspace' to the main source tree
 # and then generates patch files that the Folia build system can use.
 # It is designed to be run from the root of the repository.
@@ -35,24 +38,30 @@ find "$SHADOW_DIR" -type f -name "*.java" | while read shadow_file; do
     mkdir -p "$(dirname "$target_file")"
 
     # Copy the modified file, overwriting the original.
-    cp "$shadow_file" "$target_file"
+    cp "$shadow_file" "$target_file" || { echo "❌ ERROR: Failed to copy '$relative_path'."; exit 1; }
 done
 
 echo "📁 Entering the source code repository to commit changes..."
-cd "$SOURCE_GIT_ROOT"
+cd "$SOURCE_GIT_ROOT" || { echo "❌ ERROR: Could not navigate to the source git root at '$SOURCE_GIT_ROOT'."; exit 1; }
 
 echo "➕ Staging all changes for the patch..."
 git add .
 
-echo "💬 Committing the staged changes..."
-# This commit is temporary; its purpose is to be converted into a patch file.
-git commit -m "Folia: Apply automated shadow source updates"
+# Only commit if there are changes to be staged.
+if ! git diff-index --quiet HEAD; then
+    echo "💬 Committing the staged changes..."
+    # This commit is temporary; its purpose is to be converted into a patch file.
+    git commit -m "Folia: Apply automated shadow source updates" || { echo "❌ ERROR: 'git commit' failed."; exit 1; }
+else
+    echo "✅ No changes to commit."
+fi
+
 
 echo "🔙 Returning to the project root..."
 cd - > /dev/null
 
 echo "🔥 Rebuilding patches from the commit..."
 # The gradlew script must be executed from the 'Folia' directory.
-(cd Folia && ./gradlew rebuildPatches)
+(cd Folia && ./gradlew rebuildPatches) || { echo "❌ ERROR: Gradle 'rebuildPatches' failed. Please check the logs."; exit 1; }
 
 echo "✅ Done! Check the 'Folia/patches/server/' directory for new or updated patch files."

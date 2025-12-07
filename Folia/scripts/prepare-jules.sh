@@ -1,6 +1,9 @@
 #!/bin/bash
 # scripts/prepare-jules.sh
 
+# Exit immediately if a command exits with a non-zero status.
+set -e
+
 # This script prepares the development environment for an AI agent by generating
 # and organizing the necessary source code.
 # It is designed to be run from the root of the repository.
@@ -16,7 +19,7 @@ CANONICAL_SRC="Folia/folia-server/src/minecraft/java"
 if [ ! -d "$CANONICAL_SRC" ]; then
     echo "⚙️ Sources not found in $CANONICAL_SRC. Running 'applyPatches' (this may take a while)..."
     # Execute gradlew from the Folia subdirectory
-    (cd Folia && ./gradlew applyPatches)
+    (cd Folia && ./gradlew applyPatches) || { echo "❌ ERROR: Gradle 'applyPatches' failed. Please check the logs."; exit 1; }
 else
     echo "✅ Sources already exist in $CANONICAL_SRC."
 fi
@@ -36,7 +39,7 @@ echo "🧹 Clearing old reference sources..."
 find "$CONTEXT_DIR/vanilla_ref/" -mindepth 1 -delete
 echo "📚 Copying reference sources to '$CONTEXT_DIR/vanilla_ref'..."
 # We copy the entire source tree to provide full context.
-cp -r "$CANONICAL_SRC/." "$CONTEXT_DIR/vanilla_ref/"
+cp -r "$CANONICAL_SRC/." "$CONTEXT_DIR/vanilla_ref/" || { echo "❌ ERROR: Failed to copy reference sources."; exit 1; }
 
 # 4. Ensure the context directory is ignored by Git to avoid accidental commits.
 # This checks the .gitignore file inside the 'Folia' directory.
