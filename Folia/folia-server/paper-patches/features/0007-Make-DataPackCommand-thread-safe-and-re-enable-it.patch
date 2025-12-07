@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jules <jules@workstation>
+Date: Sun, 7 Dec 2025 01:41:12 +0000
+Subject: [PATCH] Make DataPackCommand thread-safe and re-enable it
+
+--- a/src/main/java/net/minecraft/server/commands/DataPackCommand.java
++++ b/src/main/java/net/minecraft/server/commands/DataPackCommand.java
+@@ -1,5 +1,6 @@
+ package net.minecraft.server.commands;
+
++import io.papermc.paper.threadedregions.RegionizedServer;
+ import com.google.common.collect.Lists;
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.arguments.StringArgumentType;
+@@ -128,9 +129,11 @@
+     }
+
+     private static int reload(CommandSourceStack source) {
+-        return source.getServer().reloadResources(source.getServer().getWorlds()).exceptionally((throwable) -> {
+-            LOGGER.warn("Failed to execute reload", throwable);
+-            source.sendFailure(Component.translatable("commands.datapack.reload.failed"));
+-            return null;
++        RegionizedServer.getInstance().addTask(() -> {
++            source.getServer().reloadResources(source.getServer().getWorlds()).exceptionally((throwable) -> {
++                LOGGER.warn("Failed to execute reload", throwable);
++                source.sendFailure(Component.translatable("commands.datapack.reload.failed"));
++                return null;
++            });
+         });
+         return 1;
+     }
+--- a/src/main/java/net/minecraft/server/commands/Commands.java
++++ b/src/main/java/net/minecraft/server/commands/Commands.java
+@@ -107,7 +107,7 @@
+         DamageCommand.register(this.dispatcher, context);
+         //DataCommands.register(this.dispatcher); // Folia - region threading - TODO
+-        //DataPackCommand.register(this.dispatcher, context); // Folia - region threading - TODO
++        DataPackCommand.register(this.dispatcher, context);
+         //DebugCommand.register(this.dispatcher); // Folia - region threading - TODO
+         DefaultGameModeCommands.register(this.dispatcher);
+         //DialogCommand.register(this.dispatcher, context); // Folia - region threading - TODO
