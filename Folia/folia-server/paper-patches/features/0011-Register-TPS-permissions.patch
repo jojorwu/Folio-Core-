@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jules <jules@workstation>
+Date: Sun, 7 Dec 2025 03:18:38 +0000
+Subject: [PATCH] Register TPS permissions
+
+This patch programmatically registers permissions for the /tps subcommands
+to ensure they have the correct default access levels.
+
+- `minecraft.command.tps.region` is set to `TRUE` by default,
+  allowing all players to check their region's TPS.
+- `minecraft.command.tps.admin` is set to `OP` by default,
+  restricting `/tps all` and `/tps top` to administrators.
+
+--- a/src/main/java/io/papermc/paper/command/PaperCommands.java
++++ b/src/main/java/io/papermc/paper/command/PaperCommands.java
+@@ -1,5 +1,7 @@
+ package io.papermc.paper.command;
+
++import org.bukkit.Bukkit;
++import org.bukkit.permissions.Permission;
++import org.bukkit.permissions.PermissionDefault;
+ import com.google.common.collect.Maps;
+ import io.papermc.paper.command.subcommands.ReloadCommand;
+ import io.papermc.paper.command.subcommands.VersionCommand;
+@@ -26,6 +28,10 @@
+         COMMANDS.put("mspt", new MSPTCommand("mspt"));
+         COMMANDS.put("tps", new io.papermc.paper.threadedregions.commands.CommandServerHealth()); // Folia - region threading
+
++        // Register permissions
++        Bukkit.getPluginManager().addPermission(new Permission("minecraft.command.tps.region", PermissionDefault.TRUE));
++        Bukkit.getPluginManager().addPermission(new Permission("minecraft.command.tps.admin", PermissionDefault.OP));
++
+         COMMANDS.forEach((s, command) -> {
+             server.server.getCommandMap().register(s, "Paper", command);
+         });
