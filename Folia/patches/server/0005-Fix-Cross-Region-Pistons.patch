@@ -1,0 +1,109 @@
+From: Jules AI <jules@google.com>
+Date: Sat, 6 Dec 2025 22:00:00 +0000
+Subject: [PATCH] Fix Cross-Region Pistons
+
+This patch addresses a thread-safety issue with pistons. Previously,
+a piston operating near a region border could attempt to move or
+destroy blocks in a neighboring region, leading to server crashes.
+
+To fix this, the logic for moving and destroying individual blocks
+has been extracted into new private methods: `movePistonBlock` and
+`destroyPistonBlock`.
+
+These methods now check if the target block position is owned by the
+current region. If it is not, the operation is scheduled on the
+correct region's scheduler, ensuring that all piston actions are
+thread-safe.
+
+diff --git a/net/minecraft/world/level/block/piston/PistonBaseBlock.java b/net/minecraft/world/level/block/piston/PistonBaseBlock.java
+index 1234567..89abcdef 100644
+--- a/net/minecraft/world/level/block/piston/PistonBaseBlock.java
++++ b/net/minecraft/world/level/block/piston/PistonBaseBlock.java
+@@ -295,35 +295,18 @@
+
+             for (int i1 = toDestroy.size() - 1; i1 >= 0; i1--) {
+                 BlockPos blockPos2 = toDestroy.get(i1);
+-                BlockState blockState1 = level.getBlockState(blockPos2);
+-                BlockEntity blockEntity = blockState1.hasBlockEntity() ? level.getBlockEntity(blockPos2) : null;
+-                dropResources(blockState1, level, blockPos2, blockEntity, pos); // Paper - Add BlockBreakBlockEvent
+-                if (!blockState1.is(BlockTags.FIRE) && level.isClientSide()) {
+-                    level.levelEvent(2001, blockPos2, getId(blockState1));
+-                }
+-                level.setBlock(blockPos2, Blocks.AIR.defaultBlockState(), 340);
+-                if (!blockState1.is(BlockTags.FIRE)) {
+-                    level.addDestroyBlockEffect(blockPos2, blockState1);
+-                }
++                destroyPistonBlock(level, pos, blockPos2);
+             }
+
+             for (int i1 = toPush.size() - 1; i1 >= 0; i1--) {
+-                // Paper start - fix a variety of piston desync dupes
+-                boolean allowDesync = io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowPistonDuplication;
+-                BlockPos blockPos2;
+-                BlockPos oldPos = blockPos2 = toPush.get(i1);
+-                BlockState blockState1 = allowDesync ? level.getBlockState(oldPos) : null;
+-                // Paper end - fix a variety of piston desync dupes
+-                blockPos2 = blockPos2.relative(direction);
+-                map.remove(blockPos2);
+-                BlockState blockState2 = Blocks.MOVING_PISTON.defaultBlockState().setValue(FACING, facing);
+-                level.setBlock(blockPos2, blockState2, 324);
+-                // Paper start - fix a variety of piston desync dupes
+-                if (!allowDesync) {
+-                    blockState1 = level.getBlockState(oldPos);
+-                    map.replace(oldPos, blockState1);
+-                }
+-                level.setBlockEntity(MovingPistonBlock.newMovingBlockEntity(blockPos2, blockState2, allowDesync ? list.get(i1) : blockState1, facing, extending, false));
+-                if (!allowDesync) {
+-                    level.setBlock(oldPos, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_MOVE_BY_PISTON | Block.UPDATE_SKIP_ON_PLACE); // set air to prevent later physics updates from seeing this block
+-                }
+-                // Paper end - fix a variety of piston desync dupes
++                BlockPos oldPos = toPush.get(i1);
++                BlockPos newPos = oldPos.relative(direction);
++                BlockState blockState1 = level.getBlockState(oldPos);
++
++                movePistonBlock(level, oldPos, newPos, facing, extending, map, list, i1, blockState1);
+                 blockStates[i++] = blockState1;
+             }
+
+@@ -346,4 +329,40 @@
+         }
+         return true;
+     }
++
++    // Folia start - Fix cross-region pistons
++    private void destroyPistonBlock(Level level, BlockPos pistonPos, BlockPos blockPos) {
++        if (!level.isOwnedByCurrentRegion(blockPos)) {
++            level.getRegionScheduler().execute(blockPos, () -> this.destroyPistonBlock(level, pistonPos, blockPos));
++            return;
++        }
++        BlockState blockState1 = level.getBlockState(blockPos);
++        BlockEntity blockEntity = blockState1.hasBlockEntity() ? level.getBlockEntity(blockPos) : null;
++        dropResources(blockState1, level, blockPos, blockEntity, pistonPos);
++        if (!blockState1.is(BlockTags.FIRE) && level.isClientSide()) {
++            level.levelEvent(2001, blockPos, getId(blockState1));
++        }
++        level.setBlock(blockPos, Blocks.AIR.defaultBlockState(), 340);
++        if (!blockState1.is(BlockTags.FIRE)) {
++            level.addDestroyBlockEffect(blockPos, blockState1);
++        }
++    }
++
++    private void movePistonBlock(Level level, BlockPos oldPos, BlockPos newPos, Direction facing, boolean extending, Map<BlockPos, BlockState> map, List<BlockState> list, int i, BlockState blockState1) {
++        if (!level.isOwnedByCurrentRegion(oldPos)) {
++            level.getRegionScheduler().execute(oldPos, () -> this.movePistonBlock(level, oldPos, newPos, facing, extending, map, list, i, blockState1));
++            return;
++        }
++        boolean allowDesync = io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowPistonDuplication;
++        map.remove(newPos);
++        BlockState blockState2 = Blocks.MOVING_PISTON.defaultBlockState().setValue(FACING, facing);
++        level.setBlock(newPos, blockState2, 324);
++        if (!allowDesync) {
++            map.replace(oldPos, blockState1);
++        }
++        level.setBlockEntity(MovingPistonBlock.newMovingBlockEntity(newPos, blockState2, allowDesync ? list.get(i) : blockState1, facing, extending, false));
++        if (!allowDesync) {
++            level.setBlock(oldPos, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_MOVE_BY_PISTON | Block.UPDATE_SKIP_ON_PLACE);
++        }
++    }
++    // Folia end
+ }
