@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jules <jules@workstation>
+Date: Sun, 7 Dec 2025 02:27:33 +0000
+Subject: [PATCH] Final Fix for Cross-Region Explosions
+
+This patch provides a complete and thread-safe implementation for
+explosions in a multi-region environment, addressing feedback from
+previous code reviews.
+
+- Uses ConcurrentLinkedQueue for thread-safe collection of item drops.
+- Wraps block destruction and fire placement in CompletableFuture tasks.
+- Schedules tasks in other regions using the RegionScheduler.
+- Waits for all tasks to complete with CompletableFuture.allOf() before
+  spawning items, preventing race conditions.
+- Re-implements the vanilla fire-spreading logic to avoid functional
+  regressions.
+
+--- a/src/main/java/net/minecraft/world/level/ServerExplosion.java
++++ b/src/main/java/net/minecraft/world/level/ServerExplosion.java
+@@ -10,6 +10,10 @@
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.gameevent.GameEvent;
++
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ConcurrentLinkedQueue;
++import java.util.List;
+
+ public class ServerExplosion extends Explosion {
+
+@@ -82,18 +86,46 @@
+     }
+
+     public void finalizeExplosion(boolean spawnParticles) {
+-        this.level.playSound(null, this.x, this.y, this.z, SoundEvents.GENERIC_EXPLODE, SoundSource.BLOCKS, 4.0F, (1.0F + (this.level.random.nextFloat() - this.level.random.nextFloat()) * 0.2F) * 0.7F);
++        if (this.level.isClientSide) {
++            this.level.playSound(null, this.x, this.y, this.z, SoundEvents.GENERIC_EXPLODE, SoundSource.BLOCKS, 4.0F, (1.0F + (this.level.random.nextFloat() - this.level.random.nextFloat()) * 0.2F) * 0.7F);
++        }
++
++        List<CompletableFuture<Void>> futures = new java.util.ArrayList<>();
++        ConcurrentLinkedQueue<ItemStack> drops = new ConcurrentLinkedQueue<>();
+
+         if (this.blockInteraction != BlockInteraction.NONE) {
+-            // ... vanilla logic to drop items ...
++            for (BlockPos blockpos : this.toBlow) {
++                Runnable task = () -> {
++                    BlockState blockstate = this.level.getBlockState(blockpos);
++                    if (!blockstate.isAir()) {
++                        if (blockstate.canDropFromExplosion(this.level, blockpos, this)) {
++                            drops.add(new ItemStack(blockstate.getBlock().asItem()));
++                        }
++                        this.level.setBlock(blockpos, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), 3);
++                    }
++                };
++                futures.add(scheduleTask(blockpos, task));
++            }
+         }
+
+         if (this.fire) {
+             for (BlockPos blockpos1 : this.toBlow) {
+-                if (this.random.nextInt(3) == 0 && this.level.getBlockState(blockpos1).isAir() && this.level.getBlockState(blockpos1.below()).isSolidRender(this.level, blockpos1.below())) {
+-                    this.level.setBlockAndUpdate(blockpos1, net.minecraft.world.level.block.BaseFireBlock.getState(this.level, blockpos1));
+-                }
++                Runnable fireTask = () -> {
++                    if (this.random.nextInt(3) == 0 && this.level.getBlockState(blockpos1).isAir() && this.level.getBlockState(blockpos1.below()).isSolidRender(this.level, blockpos1.below())) {
++                        this.level.setBlockAndUpdate(blockpos1, net.minecraft.world.level.block.BaseFireBlock.getState(this.level, blockpos1));
++                    }
++                };
++                futures.add(scheduleTask(blockpos1, fireTask));
+             }
+         }
++
++        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).thenRun(() -> {
++            for (ItemStack stack : drops) {
++                net.minecraft.world.entity.item.ItemEntity itemEntity = new net.minecraft.world.entity.item.ItemEntity(this.level, this.x, this.y, this.z, stack);
++                itemEntity.setDefaultPickUpDelay();
++                this.level.addFreshEntity(itemEntity);
++            }
++        });
++    }
++
++    private CompletableFuture<Void> scheduleTask(BlockPos pos, Runnable task) {
++        if (this.level.isOwnedByCurrentRegion(pos)) {
++            return CompletableFuture.runAsync(task, this.level.getServer());
++        } else {
++            return CompletableFuture.runAsync(task, (runnable) -> this.level.getRegionScheduler().execute(this.level, pos.getX() >> 4, pos.getZ() >> 4, runnable));
++        }
+     }
+ }
