@@ -1,0 +1,131 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jules <jules@workstation>
+Date: Sun, 7 Dec 2025 03:01:14 +0000
+Subject: [PATCH] Add 'top' subcommand to /tps and adjust permissions
+
+This patch introduces a 'top' subcommand to the /tps command to display
+the most loaded regions and refines the permission system.
+
+- New `/tps top` command: Shows the top 5 regions with the lowest TPS,
+  helping admins quickly identify performance hotspots.
+- Unified admin permission: `/tps all` and `/tps top` now require the
+  `minecraft.command.tps.admin` permission.
+- Default region permission: `/tps` and `/tps region` are intended for
+  general use and require `minecraft.command.tps.region`.
+
+--- a/src/main/java/io/papermc/paper/threadedregions/commands/CommandServerHealth.java
++++ b/src/main/java/io/papermc/paper/threadedregions/commands/CommandServerHealth.java
+@@ -110,20 +110,28 @@
+
+     @Override
+     public boolean execute(@NotNull final CommandSender sender, @NotNull final String commandLabel, @NotNull final String[] args) {
+-        final boolean showAll = args.length > 0 && "all".equalsIgnoreCase(args[0]);
+-        final boolean showRegion = !showAll;
++        String subcommand = args.length > 0 ? args[0].toLowerCase(Locale.ROOT) : "region";
+
+-        if (showRegion && !(sender instanceof Player)) {
+-            sender.sendMessage(Component.text("Console must use '/tps all'.", NamedTextColor.RED));
+-            return true;
++        final String requiredPermission;
++        switch (subcommand) {
++            case "all":
++            case "top":
++                requiredPermission = "minecraft.command.tps.admin";
++                break;
++            case "region":
++            default:
++                requiredPermission = "minecraft.command.tps.region";
++                if (!(sender instanceof Player)) {
++                    sender.sendMessage(Component.text("Console must use '/tps all' or '/tps top'.", NamedTextColor.RED));
++                    return true;
++                }
++                break;
+         }
+
+-        final String requiredPermission = showAll ? "minecraft.command.tps.all" : "minecraft.command.tps.region";
+-
+         if (!sender.hasPermission(requiredPermission)) {
+             sender.sendMessage(Component.text(this.getPermissionMessage(), NamedTextColor.RED));
+             return true;
+         }
+
+         final long currTime = System.nanoTime();
+         final DecimalFormat twoDp = TWO_DECIMAL_PLACES.get();
+@@ -131,10 +139,15 @@
+             .build();
+
+         final MinecraftServer server = MinecraftServer.getServer();
+-
+-        final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions = showRegion
+-            ? Collections.singletonList(server.getRegionizer().getRegion(((Player)sender).getLocation().getChunk()))
+-            : new ArrayList<>(server.getRegionizer().getRegions());
++        final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions;
++
++        if ("region".equals(subcommand)) {
++            regions = Collections.singletonList(server.getRegionizer().getRegion(((Player)sender).getLocation().getChunk()));
++        } else {
++            regions = new ArrayList<>(server.getRegionizer().getRegions());
++        }
+
+         regions.sort(Comparator.comparing(region -> region.getData().getRegionSchedulingHandle().getTickReport15s(currTime).tpsData().segmentAll().average()));
+
+@@ -268,36 +281,41 @@
+             lowestRegionsBuilder.append(line);
+         }
+
+-        final TextComponent.Builder message = Component.text()
+-            .append(Component.text("Server Health Report\n", HEADER, TextDecoration.BOLD));
+-
+-        if (showAll) {
++        TextComponent.Builder message = Component.text()
++            .append(Component.text("Server Health Report", HEADER, TextDecoration.BOLD));
++
++        if ("all".equals(subcommand)) {
+             final double averageTps = regions.isEmpty() ? 20.0 : totalTps / regions.size();
+-            message.append(Component.text(" - ", LIST, TextDecoration.BOLD))
++            message.append(Component.text("\n - ", LIST, TextDecoration.BOLD))
+                 .append(Component.text("Average Region TPS: ", PRIMARY))
+                 .append(Component.text(TWO_DECIMAL_PLACES.get().format(averageTps) + "\n", CommandUtil.getColourForTPS(averageTps)));
+-        }
+-
+-        sender.sendMessage(
+-            message
+-                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+-                .append(Component.text((showRegion ? "Region " : "") + "Uptime: ", PRIMARY))
++        } else if ("top".equals(subcommand)) {
++            message.append(Component.text("\nTop 5 Most Loaded Regions:", PRIMARY));
++            int count = 0;
++            for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : regions) {
++                if (++count > 5) break;
++                final double regionTps = tpsByRegion.getDouble(regions.indexOf(region));
++                message.append(Component.text(String.format(Locale.ROOT, "\n - Region %d, %d: ", region.getRegionX(), region.getRegionZ()), LIST, TextDecoration.BOLD))
++                    .append(Component.text(TWO_DECIMAL_PLACES.get().format(regionTps), CommandUtil.getColourForTPS(regionTps)));
++            }
++        } else { // region view
++             message.append(Component.text("\n - ", LIST, TextDecoration.BOLD))
++                .append(Component.text("Uptime: ", PRIMARY))
+                 .append(Component.text(formatInterval(System.currentTimeMillis() - server.getStartTime()) + "\n", PRIMARY))
+
+                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+-                .append(Component.text((showRegion ? "Region " : "") + "Total Utilisation: ", PRIMARY))
++                .append(Component.text("Total Utilisation: ", PRIMARY))
+                 .append(Component.text(TWO_DECIMAL_PLACES.get().format(totalUtil * 100.0) + "%\n", PRIMARY))
+
+                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+-                .append(Component.text((showRegion ? "Region " : "") + (showAll ? "Lowest " : "") + "TPS: ", PRIMARY))
++                .append(Component.text("TPS: ", PRIMARY))
+                 .append(Component.text(TWO_DECIMAL_PLACES.get().format(minTps) + "\n", CommandUtil.getColourForTPS(minTps)))
+
+                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+                 .append(Component.text("Tick Times: ", PRIMARY))
+                 .append(Component.text(tickTimes, PRIMARY))
+                 .append(Component.text(" ms", PRIMARY));
++        }
+
+-                .append(Component.text(" ms", PRIMARY))
+-                .build()
+-        );
++        sender.sendMessage(message.build());
+         return true;
+     }
+ }
